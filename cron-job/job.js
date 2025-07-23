@@ -4,14 +4,6 @@ import { db } from "./firebaseConfig.js";
 import dotenv from "dotenv";
 dotenv.config();
 
-
-const saveBurnData = async (tokenName, data) => {
-  const col = collection(db, 'burnData');
-  const docRef = doc(col, tokenName.toLowerCase());
-  await setDoc(docRef, data);
-};
-
-
 const RPC_PROVIDERS = [
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c8b8404619e14e5385a48fbbdd1bca4f"),
   new ethers.JsonRpcProvider("https://rpc.ankr.com/bsc/dc925c9d02bd1784150150a6b57c653d61457a912203be377cfbdc3fb1f8b5e6"),
@@ -60,6 +52,7 @@ const RETRY_DELAY = 2000;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Enhanced retry function with better error classification
 async function retryWithBackoff(fn, maxRetries = MAX_RETRIES) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -69,16 +62,82 @@ async function retryWithBackoff(fn, maxRetries = MAX_RETRIES) {
       const isRateLimitError =
         error?.message?.includes("rate limit") ||
         error?.message?.includes("too many requests") ||
-        error?.code === 429;
+        error?.message?.includes("429") ||
+        error?.code === 429 ||
+        error?.status === 429;
 
-      if (isLastAttempt || !isRateLimitError) throw error;
+      const isNetworkError = 
+        error?.message?.includes("network") ||
+        error?.message?.includes("timeout") ||
+        error?.message?.includes("ECONNRESET") ||
+        error?.code === 'NETWORK_ERROR';
+
+      console.log(`Attempt ${attempt + 1}/${maxRetries + 1} failed:`, error.message);
+
+      if (isLastAttempt || (!isRateLimitError && !isNetworkError)) {
+        throw error;
+      }
 
       const backoffDelay = RETRY_DELAY * Math.pow(2, attempt);
-      console.log(`Rate limited, retrying in ${backoffDelay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+      console.log(`Retrying in ${backoffDelay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
       await delay(backoffDelay);
     }
   }
   throw new Error("Max retries exceeded");
+}
+
+// Enhanced provider switching logic
+async function getWorkingProvider(providers = RPC_PROVIDERS) {
+  for (let i = 0; i < providers.length; i++) {
+    try {
+      const provider = providers[i];
+      // Test the provider with a simple call
+      await provider.getBlockNumber();
+      console.log(`Using RPC provider ${i + 1}`);
+      return provider;
+    } catch (error) {
+      console.log(`Provider ${i + 1} failed, trying next...`, error.message);
+      if (i === providers.length - 1) {
+        throw new Error("All RPC providers failed");
+      }
+    }
+  }
+}
+
+// Enhanced block fetching with multiple fallbacks
+async function getLatestBlockWithFallback(provider) {
+  return retryWithBackoff(async () => {
+    try {
+      const blockNumber = await provider.getBlockNumber();
+      console.log(`Latest block number: ${blockNumber}`);
+      
+      // Try to get the full block data
+      const blockData = await provider.getBlock(blockNumber);
+      
+      if (!blockData) {
+        // If latest block data is null, try the previous block
+        console.log("Latest block data is null, trying previous block...");
+        const previousBlockData = await provider.getBlock(blockNumber - 1);
+        
+        if (!previousBlockData) {
+          throw new Error("Both latest and previous block data are null");
+        }
+        
+        return {
+          blockNumber: blockNumber - 1,
+          blockData: previousBlockData
+        };
+      }
+      
+      return {
+        blockNumber,
+        blockData
+      };
+    } catch (error) {
+      console.error("Error fetching latest block:", error);
+      throw error;
+    }
+  });
 }
 
 async function findBlockByTimestamp(provider, targetTimestamp, latestBlock) {
@@ -93,7 +152,7 @@ async function findBlockByTimestamp(provider, targetTimestamp, latestBlock) {
         const block = await provider.getBlock(mid);
         await delay(RATE_LIMIT_DELAY);
 
-        if (block) {
+        if (block && block.timestamp) {
           if (block.timestamp <= targetTimestamp) {
             closestBlock = mid;
             left = mid + 1;
@@ -101,9 +160,11 @@ async function findBlockByTimestamp(provider, targetTimestamp, latestBlock) {
             right = mid - 1;
           }
         } else {
+          console.log(`Block ${mid} has no timestamp, skipping...`);
           right = mid - 1;
         }
-      } catch {
+      } catch (error) {
+        console.log(`Error fetching block ${mid}:`, error.message);
         right = mid - 1;
       }
     }
@@ -152,7 +213,8 @@ async function fetchBurnLogs(provider, contract, tokenAddress, fromBlock, toBloc
   });
 }
 
-async function calculateBurnData(tokenName, provider) {
+// Enhanced calculateBurnData with better error handling
+async function calculateBurnData(tokenName, provider = null) {
   try {
     const tokenAddress = TOKEN_MAP[tokenName.toLowerCase()];
     if (!tokenAddress) {
@@ -162,16 +224,17 @@ async function calculateBurnData(tokenName, provider) {
 
     console.log(`Starting burn calculation for ${tokenName}...`);
 
-    // const provider = new ethers.JsonRpcProvider(RPC_URL);
-    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    // Use provided provider or get a working one
+    const activeProvider = provider || await getWorkingProvider();
+    const contract = new ethers.Contract(tokenAddress, ERC20_ABI, activeProvider);
 
-    const [latestBlock, decimals] = await Promise.all([
-      retryWithBackoff(() => provider.getBlockNumber()),
-      retryWithBackoff(() => contract.decimals()),
-    ]);
-
-    const latestBlockData = await retryWithBackoff(() => provider.getBlock(latestBlock));
-    if (!latestBlockData) throw new Error("Failed to fetch block data");
+    // Enhanced block fetching
+    const { blockNumber: latestBlock, blockData: latestBlockData } = await getLatestBlockWithFallback(activeProvider);
+    
+    // Get decimals with retry
+    const decimals = await retryWithBackoff(() => contract.decimals());
+    
+    console.log(`Token ${tokenName}: Latest block ${latestBlock}, timestamp ${latestBlockData.timestamp}`);
 
     const latestTimestamp = latestBlockData.timestamp;
 
@@ -189,13 +252,13 @@ async function calculateBurnData(tokenName, provider) {
     const blockEstimates = {};
     for (const [key, seconds] of Object.entries(intervals)) {
       const targetTimestamp = latestTimestamp - seconds;
-      blockEstimates[key] = await findBlockByTimestamp(provider, targetTimestamp, latestBlock);
+      blockEstimates[key] = await findBlockByTimestamp(activeProvider, targetTimestamp, latestBlock);
       await delay(RATE_LIMIT_DELAY);
     }
 
     const results = [];
     for (const [key, fromBlock] of Object.entries(blockEstimates)) {
-      const result = await fetchBurnLogs(provider, contract, tokenAddress, fromBlock, latestBlock);
+      const result = await fetchBurnLogs(activeProvider, contract, tokenAddress, fromBlock, latestBlock);
       results.push({ key, result });
       await delay(RATE_LIMIT_DELAY * 2);
     }
@@ -258,52 +321,75 @@ async function getCachedBurnData(tokenName) {
   }
 }
 
+// Enhanced processAllTokens with better error handling and provider management
 async function processAllTokens() {
   console.log("Starting burn data calculation for all tokens...");
   const tokenNames = Object.keys(TOKEN_MAP);
   const results = [];
 
-  // Split tokens across RPCs
-  const tokenChunks = RPC_PROVIDERS.map((_, i) =>
-    tokenNames.filter((_, index) => index % RPC_PROVIDERS.length === i)
-  );
-
-  // One async worker per provider
-  const workers = tokenChunks.map((tokens, idx) =>
-    (async () => {
-      const provider = RPC_PROVIDERS[idx];
-
-      for (const tokenName of tokens) {
-        try {
-          console.log(`[RPC ${idx + 1}] Processing ${tokenName}...`);
-          const burnData = await calculateBurnData(tokenName, provider);
-
-          if (burnData) {
-            await saveBurnDataToFirebase(tokenName, burnData);
-            results.push({ tokenName, success: true });
-          } else {
-            results.push({ tokenName, success: false, error: "Failed to calculate burn data" });
-          }
-
-          await delay(RATE_LIMIT_DELAY * 2); // throttle per provider
-        } catch (e) {
-          console.error(`Error processing ${tokenName} on RPC ${idx + 1}`, e);
-          results.push({ tokenName, success: false });
-        }
+  try {
+    // Get working providers
+    const workingProviders = [];
+    for (const provider of RPC_PROVIDERS) {
+      try {
+        await provider.getBlockNumber();
+        workingProviders.push(provider);
+      } catch {
+        console.log("Provider failed health check, skipping...");
       }
-    })()
-  );
+    }
 
-  await Promise.all(workers);
+    if (workingProviders.length === 0) {
+      throw new Error("No working RPC providers available");
+    }
+
+    console.log(`Using ${workingProviders.length} working providers`);
+
+    // Split tokens across working providers
+    const tokenChunks = workingProviders.map((_, i) =>
+      tokenNames.filter((_, index) => index % workingProviders.length === i)
+    );
+
+    // Process tokens with working providers
+    const workers = tokenChunks.map((tokens, idx) =>
+      (async () => {
+        const provider = workingProviders[idx];
+
+        for (const tokenName of tokens) {
+          try {
+            console.log(`[Provider ${idx + 1}] Processing ${tokenName}...`);
+            const burnData = await calculateBurnData(tokenName, provider);
+
+            if (burnData) {
+              await saveBurnDataToFirebase(tokenName, burnData);
+              results.push({ tokenName, success: true });
+            } else {
+              results.push({ tokenName, success: false, error: "Failed to calculate burn data" });
+            }
+
+            await delay(RATE_LIMIT_DELAY * 3); // More conservative throttling
+          } catch (e) {
+            console.error(`Error processing ${tokenName} on Provider ${idx + 1}:`, e.message);
+            results.push({ tokenName, success: false, error: e.message });
+          }
+        }
+      })()
+    );
+
+    await Promise.all(workers);
+  } catch (error) {
+    console.error("Fatal error in processAllTokens:", error);
+  }
 
   console.log("✅ Completed processing all tokens:", results);
+  return results;
 }
 
-
-// ✅ Export as ES module
 export {
   calculateBurnData,
   saveBurnDataToFirebase,
   getCachedBurnData,
   processAllTokens,
+  getWorkingProvider,
+  getLatestBlockWithFallback,
 };
