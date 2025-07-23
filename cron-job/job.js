@@ -15,7 +15,7 @@ const saveBurnData = async (tokenName, data) => {
 const RPC_PROVIDERS = [
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c8b8404619e14e5385a48fbbdd1bca4f"),
   new ethers.JsonRpcProvider("https://rpc.ankr.com/bsc/dc925c9d02bd1784150150a6b57c653d61457a912203be377cfbdc3fb1f8b5e6"),
-  new ethers.JsonRpcProvider("https://long-summer-research.bsc.quiknode.pro/61dcbf46ffc2d37ea2d0d499d4617b9781341f81/"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/d0bf9063f4774bee9d8fefc095f31c42"),
 ];
 
 const BURN_ADDRESSES = [
