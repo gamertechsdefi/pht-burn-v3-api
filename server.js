@@ -1,14 +1,35 @@
+import express from "express";
 import cron from "node-cron";
 import { processAllTokens } from "./cron-job/job.js";
-import dotenv from "dotenv";
 
-dotenv.config();
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Middleware
+app.use(express.json());
+
+// Store latest results
+let burnData = {};
+
+// Health check endpoint for Render
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// Serve latest burn data
+app.get("/burn-data", (req, res) => {
+  if (Object.keys(burnData).length === 0) {
+    return res.status(503).json({ error: "Burn data not yet available" });
+  }
+  res.json(burnData);
+});
 
 // Dynamic scheduling function
 async function runAndSchedule() {
   console.log(`Starting token processing at ${new Date().toISOString()}...`);
   try {
     const result = await processAllTokens(); // Wait for all tokens to process
+    burnData = result || burnData; // Update burnData
     console.log(`Completed processing at ${new Date().toISOString()}. Scheduling next run in 5 minutes...`);
 
     // Schedule the next run 5 minutes from now
@@ -18,7 +39,7 @@ async function runAndSchedule() {
       async () => {
         await runAndSchedule(); // Recursively schedule after completion
       },
-      { scheduled: true, timezone: "Africa/Nigeria" } // CEST timezone
+      { scheduled: true, timezone: "Europe/Paris" } // CEST timezone
     );
   } catch (error) {
     console.error(`Error in runAndSchedule: ${error.message}`);
@@ -44,6 +65,8 @@ process.on("unhandledRejection", (reason, promise) => {
   console.error("Unhandled Rejection at:", promise, "reason:", reason);
 });
 
-// Start the first run
-console.log("Initializing cron job...");
-runAndSchedule();
+// Start server and initial job
+app.listen(PORT, () => {
+  console.log(`🚀 API running on port ${PORT}`);
+  runAndSchedule(); // Start the first run
+});
