@@ -1,11 +1,12 @@
 // index.js
 import express from 'express';
+import cron from 'node-cron';
 import { processAllTokens } from './cron-job/job.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware to parse JSON (if needed for other endpoints)
+// Middleware
 app.use(express.json());
 
 // Store latest results
@@ -16,7 +17,7 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Endpoint to serve burn data
+// Serve latest burn data
 app.get('/burn-data', (req, res) => {
   if (Object.keys(burnData).length === 0) {
     return res.status(503).json({ error: 'Burn data not yet available' });
@@ -24,41 +25,42 @@ app.get('/burn-data', (req, res) => {
   res.json(burnData);
 });
 
-// Background job to process tokens every 5 minutes
-async function startJobLoop() {
-  while (true) {
-    try {
-      console.log('Starting token processing...');
-      const result = await processAllTokens(); // Assuming it returns data
-      burnData = result || burnData; // Only update if result is valid
-      console.log('Burn data updated successfully');
-    } catch (err) {
-      console.error('Failed to process tokens:', err.message);
-      // Optionally log stack trace for debugging
-      console.error(err.stack);
-    }
-    // Wait 5 minutes before next iteration
-    await new Promise((resolve) => setTimeout(resolve, 5 * 60 * 1000));
+// Run the job immediately once on server start
+async function runInitialJob() {
+  try {
+    console.log('Running initial burn data job...');
+    const result = await processAllTokens();
+    burnData = result || burnData;
+    console.log('Initial burn data updated successfully');
+  } catch (err) {
+    console.error('Initial job failed:', err.message);
   }
 }
 
-// Error handling for uncaught exceptions to prevent process crashes
+// Schedule job every 5 minutes
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    console.log('⏰ Scheduled burn job started...');
+    const result = await processAllTokens();
+    burnData = result || burnData;
+    console.log('✅ Burn data updated via cron');
+  } catch (err) {
+    console.error('Scheduled job failed:', err.message);
+  }
+});
+
+// Global error handling
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err.message);
   console.error(err.stack);
-  // Note: Not exiting process to keep it running
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Note: Not exiting process to keep it running
 });
 
-// Start the server
+// Start server
 app.listen(PORT, () => {
-  console.log(`API listening on port ${PORT}`);
-  // Start background job in a non-blocking way
-  startJobLoop().catch((err) => {
-    console.error('Failed to start job loop:', err.message);
-  });
+  console.log(`🚀 API running on port ${PORT}`);
+  runInitialJob(); // Initial fetch before first cron trigger
 });

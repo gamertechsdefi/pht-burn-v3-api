@@ -8,7 +8,17 @@ const RPC_PROVIDERS = [
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c8b8404619e14e5385a48fbbdd1bca4f"),
   new ethers.JsonRpcProvider("https://rpc.ankr.com/bsc/dc925c9d02bd1784150150a6b57c653d61457a912203be377cfbdc3fb1f8b5e6"),
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/d0bf9063f4774bee9d8fefc095f31c42"),
+
+   new ethers.JsonRpcProvider("https://site1.moralis-nodes.com/bsc/28493b39c92e4cccb0364249757a73df"),
+  new ethers.JsonRpcProvider("https://rpc.ankr.com/multichain/14ef0ee6948fb2070b8ecfca6abefaa854576bb3e91eb10c7c8bdd9424bd4f17"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c0709fe256dd44c699679b22293b177f"),
+  new ethers.JsonRpcProvider("https://billowing-autumn-putty.bsc.quiknode.pro/9f0a8e4f7aca60859ac94c8547d77a29cfabab17/"),
+
 ];
+
+const PRIMARY_PROVIDERS = RPC_PROVIDERS.slice(0, 3);
+const FALLBACK_PROVIDERS = RPC_PROVIDERS.slice(3);
+
 
 const BURN_ADDRESSES = [
   "0x000000000000000000000000000000000000dEaD",
@@ -87,22 +97,41 @@ async function retryWithBackoff(fn, maxRetries = MAX_RETRIES) {
 }
 
 // Enhanced provider switching logic
-async function getWorkingProvider(providers = RPC_PROVIDERS) {
-  for (let i = 0; i < providers.length; i++) {
+async function getWorkingProvidersWithFallback(primary = PRIMARY_PROVIDERS, fallback = FALLBACK_PROVIDERS, requiredCount = 3) {
+  const working = [];
+
+  // Check primary providers first
+  for (let i = 0; i < primary.length; i++) {
+    const provider = primary[i];
     try {
-      const provider = providers[i];
-      // Test the provider with a simple call
       await provider.getBlockNumber();
-      console.log(`Using RPC provider ${i + 1}`);
-      return provider;
-    } catch (error) {
-      console.log(`Provider ${i + 1} failed, trying next...`, error.message);
-      if (i === providers.length - 1) {
-        throw new Error("All RPC providers failed");
-      }
+      working.push(provider);
+      console.log(`Primary provider ${i + 1} is working`);
+    } catch (e) {
+      console.warn(`Primary provider ${i + 1} failed: ${e.message}`);
     }
   }
+
+  // Use fallback if needed
+  for (let i = 0; i < fallback.length && working.length < requiredCount; i++) {
+    const provider = fallback[i];
+    try {
+      await provider.getBlockNumber();
+      working.push(provider);
+      console.log(`Fallback provider ${i + 1} is working`);
+    } catch (e) {
+      console.warn(`Fallback provider ${i + 1} failed: ${e.message}`);
+    }
+  }
+
+  if (working.length === 0) {
+    throw new Error("No working RPC providers available.");
+  }
+
+  return working;
 }
+
+
 
 // Enhanced block fetching with multiple fallbacks
 async function getLatestBlockWithFallback(provider) {
@@ -215,26 +244,28 @@ async function fetchBurnLogs(provider, contract, tokenAddress, fromBlock, toBloc
 
 // Enhanced calculateBurnData with better error handling
 async function calculateBurnData(tokenName, provider = null) {
+  const tokenAddress = TOKEN_MAP[tokenName.toLowerCase()];
+  if (!tokenAddress) {
+    console.error(`Invalid token: ${tokenName}`);
+    return null;
+  }
+
+  console.log(`Starting burn calculation for ${tokenName}...`);
+
+  let activeProvider = provider;
+  let fallbackTried = false;
+
   try {
-    const tokenAddress = TOKEN_MAP[tokenName.toLowerCase()];
-    if (!tokenAddress) {
-      console.error(`Invalid token: ${tokenName}`);
-      return null;
+    // Get a fallback-aware provider only if not passed
+    if (!activeProvider) {
+      const workingProviders = await getWorkingProvidersWithFallback();
+      activeProvider = workingProviders[0]; // use only the first working one
     }
 
-    console.log(`Starting burn calculation for ${tokenName}...`);
-
-    // Use provided provider or get a working one
-    const activeProvider = provider || await getWorkingProvider();
     const contract = new ethers.Contract(tokenAddress, ERC20_ABI, activeProvider);
 
-    // Enhanced block fetching
     const { blockNumber: latestBlock, blockData: latestBlockData } = await getLatestBlockWithFallback(activeProvider);
-    
-    // Get decimals with retry
     const decimals = await retryWithBackoff(() => contract.decimals());
-    
-    console.log(`Token ${tokenName}: Latest block ${latestBlock}, timestamp ${latestBlockData.timestamp}`);
 
     const latestTimestamp = latestBlockData.timestamp;
 
@@ -295,11 +326,28 @@ async function calculateBurnData(tokenName, provider = null) {
       lastUpdated: now.toISOString(),
       nextUpdate: nextUpdate.toISOString(),
     };
+
   } catch (error) {
-    console.error(`Error calculating burn data for ${tokenName}:`, error);
+    console.error(`Error calculating burn data for ${tokenName} on current provider:`, error.message);
+
+    if (!fallbackTried) {
+      console.log("Attempting fallback provider...");
+      fallbackTried = true;
+      try {
+        // Get fallback provider and retry
+        const workingFallbacks = await getWorkingProvidersWithFallback(PRIMARY_PROVIDERS, FALLBACK_PROVIDERS, 1);
+        if (workingFallbacks.length) {
+          return await calculateBurnData(tokenName, workingFallbacks[0]);
+        }
+      } catch (fallbackError) {
+        console.error("Fallback provider failed too:", fallbackError.message);
+      }
+    }
+
     return null;
   }
 }
+
 
 async function saveBurnDataToFirebase(tokenName, burnData) {
   try {
@@ -329,15 +377,7 @@ async function processAllTokens() {
 
   try {
     // Get working providers
-    const workingProviders = [];
-    for (const provider of RPC_PROVIDERS) {
-      try {
-        await provider.getBlockNumber();
-        workingProviders.push(provider);
-      } catch {
-        console.log("Provider failed health check, skipping...");
-      }
-    }
+    const workingProviders = await getWorkingProvidersWithFallback();
 
     if (workingProviders.length === 0) {
       throw new Error("No working RPC providers available");
@@ -390,6 +430,6 @@ export {
   saveBurnDataToFirebase,
   getCachedBurnData,
   processAllTokens,
-  getWorkingProvider,
+  getWorkingProvidersWithFallback,
   getLatestBlockWithFallback,
 };
