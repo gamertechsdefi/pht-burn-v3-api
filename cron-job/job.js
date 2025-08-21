@@ -6,14 +6,10 @@ dotenv.config();
 
 const RPC_PROVIDERS = [
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c8b8404619e14e5385a48fbbdd1bca4f"),
-  new ethers.JsonRpcProvider("https://rpc.ankr.com/bsc/dc925c9d02bd1784150150a6b57c653d61457a912203be377cfbdc3fb1f8b5e6"),
-  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/d0bf9063f4774bee9d8fefc095f31c42"),
-
-   new ethers.JsonRpcProvider("https://site1.moralis-nodes.com/bsc/28493b39c92e4cccb0364249757a73df"),
-  new ethers.JsonRpcProvider("https://rpc.ankr.com/multichain/14ef0ee6948fb2070b8ecfca6abefaa854576bb3e91eb10c7c8bdd9424bd4f17"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/e83959b4b8724ee48350e2da37cbd89e"),
+  new ethers.JsonRpcProvider("https://site1.moralis-nodes.com/bsc/28493b39c92e4cccb0364249757a73df"),
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c0709fe256dd44c699679b22293b177f"),
   new ethers.JsonRpcProvider("https://billowing-autumn-putty.bsc.quiknode.pro/9f0a8e4f7aca60859ac94c8547d77a29cfabab17/"),
-
 ];
 
 const PRIMARY_PROVIDERS = RPC_PROVIDERS.slice(0, 3);
