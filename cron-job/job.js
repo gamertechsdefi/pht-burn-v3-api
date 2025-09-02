@@ -51,6 +51,10 @@ const TOKEN_MAP = {
   spray: "0x6C0D4adAc8fb85CC336C669C08b44f2e1d492575",
   mbc: "0x170f044f9c7a41ff83caccad6ccca1b941d75af7",
   mars: "0x6844b2e9afb002d188a072a3ef0fbb068650f214",
+  sdc: "0x8cDC41236C567511f84C12Da10805cF50Dcdc27b",
+  kind: "0x41f52A42091A6B2146561bF05b722Ad1d0e46f8b",
+  shibc: "0x456B1049bA12f906326891486B2BA93e46Ae0369",
+  pcat: "0xFeD56F9Cd29F44e7C61c396DAc95cb3ed33d3546",
 };
 
 const ERC20_ABI = [
@@ -78,7 +82,7 @@ async function retryWithBackoff(fn, maxRetries = MAX_RETRIES) {
         error?.code === 429 ||
         error?.status === 429;
 
-      const isNetworkError = 
+      const isNetworkError =
         error?.message?.includes("network") ||
         error?.message?.includes("timeout") ||
         error?.message?.includes("ECONNRESET") ||
@@ -141,25 +145,25 @@ async function getLatestBlockWithFallback(provider) {
     try {
       const blockNumber = await provider.getBlockNumber();
       console.log(`Latest block number: ${blockNumber}`);
-      
+
       // Try to get the full block data
       const blockData = await provider.getBlock(blockNumber);
-      
+
       if (!blockData) {
         // If latest block data is null, try the previous block
         console.log("Latest block data is null, trying previous block...");
         const previousBlockData = await provider.getBlock(blockNumber - 1);
-        
+
         if (!previousBlockData) {
           throw new Error("Both latest and previous block data are null");
         }
-        
+
         return {
           blockNumber: blockNumber - 1,
           blockData: previousBlockData
         };
       }
-      
+
       return {
         blockNumber,
         blockData
