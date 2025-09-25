@@ -5,9 +5,9 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const RPC_PROVIDERS = [
-  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c8b8404619e14e5385a48fbbdd1bca4f"),
-  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/e83959b4b8724ee48350e2da37cbd89e"),
-  new ethers.JsonRpcProvider("https://site1.moralis-nodes.com/bsc/28493b39c92e4cccb0364249757a73df"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/5f0483aac11a4c98a31ae0a8fc8105b5"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/a9e5474684444802be1afdd00713c304"),
+  new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/23d12998e0d5431eac05ec4423ff5bcc"),
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c0709fe256dd44c699679b22293b177f"),
   new ethers.JsonRpcProvider("https://billowing-autumn-putty.bsc.quiknode.pro/9f0a8e4f7aca60859ac94c8547d77a29cfabab17/"),
 ];
@@ -55,6 +55,14 @@ const TOKEN_MAP = {
   kind: "0x41f52A42091A6B2146561bF05b722Ad1d0e46f8b",
   shibc: "0x456B1049bA12f906326891486B2BA93e46Ae0369",
   pcat: "0xFeD56F9Cd29F44e7C61c396DAc95cb3ed33d3546",
+  egw: "0x2056d14A4116A7165cfeb7D79dB760a06b57DBCa",
+  "1000pdf": "0xCa7930478492CDe4Be997FA898Cd1a6AfB8F41A1",
+  aidove: "0xe9E3CDB871D315fEE80aF4c9FcD4886782694856",
+  hmt: "0x360f2cf415d9be6e82a7252681ac116fb63d2fa2",
+  rbcat: "0x14A2db256Ef18c4f7165d5E48f65a528b4155100",
+  bbcat: "0x32Eb603F30ba75052f608CFcbAC45e39B5eF9beC",
+  cct: "0x8489c022a10a8d2a65eb5aF2b0E4aE0191e7916D",
+  talent: "0x38Aec84f305564cB2625430A294382Cf33e3c317",
 };
 
 const ERC20_ABI = [
@@ -317,7 +325,14 @@ async function calculateBurnData(tokenName, provider = null) {
     });
 
     const now = new Date();
-    const nextUpdate = new Date(now.getTime() + 5 * 60 * 1000);
+    // Calculate next 6pm UTC
+    const nextUpdate = new Date();
+    nextUpdate.setUTCHours(18, 0, 0, 0); // Set to 6pm UTC
+
+    // If it's already past 6pm today, schedule for tomorrow
+    if (now >= nextUpdate) {
+      nextUpdate.setUTCDate(nextUpdate.getUTCDate() + 1);
+    }
 
     return {
       address: tokenAddress,
@@ -380,6 +395,7 @@ async function processAllTokens() {
   console.log("Starting burn data calculation for all tokens...");
   const tokenNames = Object.keys(TOKEN_MAP);
   const results = [];
+  const burnDataCollection = {};
 
   try {
     // Get working providers
@@ -408,6 +424,7 @@ async function processAllTokens() {
 
             if (burnData) {
               await saveBurnDataToFirebase(tokenName, burnData);
+              burnDataCollection[tokenName] = burnData;
               results.push({ tokenName, success: true });
             } else {
               results.push({ tokenName, success: false, error: "Failed to calculate burn data" });
@@ -428,7 +445,9 @@ async function processAllTokens() {
   }
 
   console.log("✅ Completed processing all tokens:", results);
-  return results;
+
+  // Return the collected burn data for caching
+  return Object.keys(burnDataCollection).length > 0 ? burnDataCollection : null;
 }
 
 export {
@@ -438,4 +457,5 @@ export {
   processAllTokens,
   getWorkingProvidersWithFallback,
   getLatestBlockWithFallback,
+  TOKEN_MAP,
 };
