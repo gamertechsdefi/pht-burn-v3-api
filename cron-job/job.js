@@ -11,7 +11,6 @@ const RPC_PROVIDERS = [
   new ethers.JsonRpcProvider("https://bsc-mainnet.infura.io/v3/c0709fe256dd44c699679b22293b177f"),
   new ethers.JsonRpcProvider("https://billowing-autumn-putty.bsc.quiknode.pro/9f0a8e4f7aca60859ac94c8547d77a29cfabab17/"),
 ];
-
 const PRIMARY_PROVIDERS = RPC_PROVIDERS.slice(0, 3);
 const FALLBACK_PROVIDERS = RPC_PROVIDERS.slice(3);
 
@@ -325,14 +324,7 @@ async function calculateBurnData(tokenName, provider = null) {
     });
 
     const now = new Date();
-    // Calculate next 6pm UTC
-    const nextUpdate = new Date();
-    nextUpdate.setUTCHours(18, 0, 0, 0); // Set to 6pm UTC
-
-    // If it's already past 6pm today, schedule for tomorrow
-    if (now >= nextUpdate) {
-      nextUpdate.setUTCDate(nextUpdate.getUTCDate() + 1);
-    }
+    const nextUpdate = new Date(now.getTime() + 5 * 60 * 1000);
 
     return {
       address: tokenAddress,
@@ -370,10 +362,14 @@ async function calculateBurnData(tokenName, provider = null) {
 }
 
 
+// ...existing code...
+
 async function saveBurnDataToFirebase(tokenName, burnData) {
   try {
-    await setDoc(doc(collection(db, "burnData"), tokenName.toLowerCase()), burnData);
-    console.log(`Saved burn data for ${tokenName} to Firebase`);
+    const address = TOKEN_MAP[tokenName.toLowerCase()];
+    if (!address) throw new Error(`Unknown token: ${tokenName}`);
+    await setDoc(doc(collection(db, "burnData"), address.toLowerCase()), burnData);
+    console.log(`Saved burn data for ${tokenName} (${address}) to Firebase`);
   } catch (error) {
     console.error(`Error saving burn data for ${tokenName}:`, error);
     throw error;
@@ -382,7 +378,9 @@ async function saveBurnDataToFirebase(tokenName, burnData) {
 
 async function getCachedBurnData(tokenName) {
   try {
-    const docSnap = await getDoc(doc(collection(db, "burnData"), tokenName.toLowerCase()));
+    const address = TOKEN_MAP[tokenName.toLowerCase()];
+    if (!address) throw new Error(`Unknown token: ${tokenName}`);
+    const docSnap = await getDoc(doc(collection(db, "burnData"), address.toLowerCase()));
     return docSnap.exists() ? docSnap.data() : null;
   } catch (error) {
     console.error(`Error getting cached burn data for ${tokenName}:`, error);
@@ -390,12 +388,23 @@ async function getCachedBurnData(tokenName) {
   }
 }
 
+// ...existing code...
+
+// async function getCachedBurnData(tokenName) {
+//   try {
+//     const docSnap = await getDoc(doc(collection(db, "burnData"), tokenName.toLowerCase()));
+//     return docSnap.exists() ? docSnap.data() : null;
+//   } catch (error) {
+//     console.error(`Error getting cached burn data for ${tokenName}:`, error);
+//     return null;
+//   }
+// }
+
 // Enhanced processAllTokens with better error handling and provider management
 async function processAllTokens() {
   console.log("Starting burn data calculation for all tokens...");
   const tokenNames = Object.keys(TOKEN_MAP);
   const results = [];
-  const burnDataCollection = {};
 
   try {
     // Get working providers
@@ -424,7 +433,6 @@ async function processAllTokens() {
 
             if (burnData) {
               await saveBurnDataToFirebase(tokenName, burnData);
-              burnDataCollection[tokenName] = burnData;
               results.push({ tokenName, success: true });
             } else {
               results.push({ tokenName, success: false, error: "Failed to calculate burn data" });
@@ -445,9 +453,7 @@ async function processAllTokens() {
   }
 
   console.log("✅ Completed processing all tokens:", results);
-
-  // Return the collected burn data for caching
-  return Object.keys(burnDataCollection).length > 0 ? burnDataCollection : null;
+  return results;
 }
 
 export {
@@ -457,5 +463,4 @@ export {
   processAllTokens,
   getWorkingProvidersWithFallback,
   getLatestBlockWithFallback,
-  TOKEN_MAP,
 };
