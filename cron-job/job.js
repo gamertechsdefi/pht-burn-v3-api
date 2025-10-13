@@ -63,6 +63,7 @@ const TOKEN_MAP = {
   bbcat: "0x32Eb603F30ba75052f608CFcbAC45e39B5eF9beC",
   cct: "0x8489c022a10a8d2a65eb5aF2b0E4aE0191e7916D",
   talent: "0x38Aec84f305564cB2625430A294382Cf33e3c317",
+  orb: "0x218ce180c6b21a355a55cdbb5b3b3bf7aad5c8a5",
 };
 
 const ERC20_ABI = [
