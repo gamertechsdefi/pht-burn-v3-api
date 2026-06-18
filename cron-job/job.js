@@ -246,7 +246,7 @@ async function fetchBurnLogs(provider, contract, tokenAddress, fromBlock, toBloc
 }
 
 // Enhanced calculateBurnData with better error handling
-async function calculateBurnData(tokenName, provider = null) {
+async function calculateBurnData(tokenName, provider = null, referenceBlock = null) {
   const tokenAddress = TOKEN_MAP[tokenName.toLowerCase()];
   if (!tokenAddress) {
     console.error(`Invalid token: ${tokenName}`);
@@ -267,7 +267,17 @@ async function calculateBurnData(tokenName, provider = null) {
 
     const contract = new ethers.Contract(tokenAddress, ERC20_ABI, activeProvider);
 
-    const { blockNumber: latestBlock, blockData: latestBlockData } = await getLatestBlockWithFallback(activeProvider);
+    // Use reference block if provided, otherwise get latest
+    let latestBlock, latestBlockData;
+    if (referenceBlock) {
+      latestBlock = referenceBlock.blockNumber;
+      latestBlockData = referenceBlock.blockData;
+    } else {
+      const result = await getLatestBlockWithFallback(activeProvider);
+      latestBlock = result.blockNumber;
+      latestBlockData = result.blockData;
+    }
+
     const decimals = await retryWithBackoff(() => contract.decimals());
 
     const latestTimestamp = latestBlockData.timestamp;
@@ -340,7 +350,7 @@ async function calculateBurnData(tokenName, provider = null) {
         // Get fallback provider and retry
         const workingFallbacks = await getWorkingProvidersWithFallback(PRIMARY_PROVIDERS, FALLBACK_PROVIDERS, 1);
         if (workingFallbacks.length) {
-          return await calculateBurnData(tokenName, workingFallbacks[0]);
+          return await calculateBurnData(tokenName, workingFallbacks[0], referenceBlock);
         }
       } catch (fallbackError) {
         console.error("Fallback provider failed too:", fallbackError.message);
@@ -406,6 +416,11 @@ async function processAllTokens() {
 
     console.log(`Using ${workingProviders.length} working providers`);
 
+    // Get ONE reference block for all tokens (ensures consistent time window)
+    console.log("Fetching reference block for consistent calculations...");
+    const referenceBlock = await getLatestBlockWithFallback(workingProviders[0]);
+    console.log(`Reference block: ${referenceBlock.blockNumber} (timestamp: ${referenceBlock.blockData.timestamp})`);
+
     // Split tokens across working providers
     const tokenChunks = workingProviders.map((_, i) =>
       tokenNames.filter((_, index) => index % workingProviders.length === i)
@@ -419,7 +434,7 @@ async function processAllTokens() {
         for (const tokenName of tokens) {
           try {
             console.log(`[Provider ${idx + 1}] Processing ${tokenName}...`);
-            const burnData = await calculateBurnData(tokenName, provider);
+            const burnData = await calculateBurnData(tokenName, provider, referenceBlock);
 
             if (burnData) {
               await saveBurnDataToFirebase(tokenName, burnData);
