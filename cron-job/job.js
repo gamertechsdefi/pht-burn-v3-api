@@ -53,6 +53,7 @@ const TOKEN_MAP = {
   jct: "0x199A88E5BFacc9eAB72913c5F05Ca75D1f30234f",
   amem: "0x0B9237Fc2D9b2bA19023ddBCCF0Dd649092bb649",
   aide: "0xA925EbCF141c5efdDA5c38c569Ab789aa52f0Fc3",
+  amem: "0x0b9237fc2d9b2ba19023ddbccf0dd649092bb649",
 };
 
 const ERC20_ABI = [
