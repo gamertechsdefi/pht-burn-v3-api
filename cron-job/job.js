@@ -54,6 +54,7 @@ const TOKEN_MAP = {
   amem: "0x0B9237Fc2D9b2bA19023ddBCCF0Dd649092bb649",
   aide: "0xA925EbCF141c5efdDA5c38c569Ab789aa52f0Fc3",
   amem: "0x0b9237fc2d9b2ba19023ddbccf0dd649092bb649",
+  griot: "0xa6e3eacdf8e6a1ea02052693838f3653fa3bffff",
 };
 
 const ERC20_ABI = [
